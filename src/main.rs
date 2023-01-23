@@ -33,14 +33,18 @@ fn main() {
     let mut args = Args::parse();
 
     if args.path.starts_with('~') {
-        args.path = args.path.resolve().to_str().unwrap().to_owned();
-    }
-
-    if let Err(e) = fs::create_dir("/tmp/ripmd") {
-        println!("Tmp dir already exists: {}", e);
+        args.path = args
+            .path
+            .try_resolve()
+            .expect("Failed to resolve path")
+            .to_str()
+            .unwrap()
+            .to_owned();
     }
 
     let converter = Md2HtmlConverter::new(&args.github_token);
+
+    create_temp_dir_if_needed();
 
     let (ssender, sreceiver) = mpsc::channel();
     let (wsender, wreceiver) = mpsc::channel();
@@ -50,6 +54,7 @@ fn main() {
         match html {
             Err(e) => println!("Failed to load html: {:?}", e),
             Ok(html) => {
+                // TODO: Refactor unwrap
                 ssender.send(html).unwrap();
                 wsender.send(WsUpdate::ReloadClient).unwrap();
             }
@@ -57,10 +62,12 @@ fn main() {
     });
 
     let base_path = get_base_path(&args.path);
-    thread::spawn(move || server::serve("localhost:8080", sreceiver, base_path));
+    thread::spawn(|| server::serve("localhost:8080", sreceiver, base_path));
     thread::spawn(|| server::ws("localhost:8089", wreceiver));
 
-    handle.join().unwrap();
+    handle
+        .join()
+        .expect("Failed to start markdown file watcher");
 }
 
 fn watch_file<F>(path: String, producer: F) -> JoinHandle<()>
@@ -94,6 +101,12 @@ where
             thread::sleep(Duration::from_millis(50));
         }
     })
+}
+
+fn create_temp_dir_if_needed() {
+    if let Err(e) = fs::create_dir("/tmp/ripmd") {
+        println!("Tmp dir already exists: {}", e);
+    }
 }
 
 fn get_base_path(path: &str) -> String {

@@ -6,6 +6,8 @@ use reqwest::{
     header::{self, HeaderMap, HeaderValue},
 };
 
+use crate::plantuml_parser;
+
 pub type Html = String;
 pub type Result<T> = core::result::Result<T, reqwest::Error>;
 
@@ -42,6 +44,10 @@ impl Md2HtmlConverter {
             .bearer_auth(&self.token)
             .json(&request)
             .send()?;
-        return res.text();
+
+        let mut html = res.text()?;
+        html = plantuml_parser::replace_plantuml_with_images(&html);
+
+        Ok(html)
     }
 }

@@ -12,6 +12,7 @@ use std::fs::{self, File};
 use std::io::Read;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 const CHUNK_SIZE: usize = 1024;
@@ -41,48 +42,37 @@ fn main() {
     }
 
     if let Err(e) = fs::create_dir("/tmp/ripmd") {
-        println!("Failed to create tmp dir {}", e);
+        println!("Tmp dir already exists: {}", e);
     }
 
     let converter = Md2HtmlConverter::new(&args.github_token);
 
-    let path = &args.path;
-    let receiver = foo(path.to_owned(), move |sender, text| {
-        let html = converter.convert(&text);
+    let (ssender, sreceiver) = mpsc::channel();
+    let (wsender, wreceiver) = mpsc::channel();
+
+    let handle = watch_file(args.path.to_owned(), move |md| {
+        let html = converter.convert(&md);
         match html {
             Err(e) => println!("Failed to load html: {:?}", e),
             Ok(html) => {
-                sender.send(Message::FileUpdated(html)).unwrap();
+                ssender.send(html).unwrap();
+                wsender.send(WsUpdate::ReloadClient).unwrap();
             }
         }
     });
 
-    let (ssender, sreceiver) = mpsc::channel();
-    let (wsender, wreceiver) = mpsc::channel();
-    let base_path = get_base_path(path);
+    let base_path = get_base_path(&args.path);
     thread::spawn(move || server::serve("localhost:8080", sreceiver, base_path));
     thread::spawn(|| server::ws("localhost:8089", wreceiver));
 
-    loop {
-        if let Ok(message) = receiver.recv() {
-            match message {
-                Message::FileUpdated(mut html) => {
-                    println!("File updated");
-                    html = plantuml_parser::replace_plantuml_with_images(&html);
-                    ssender.send(html).unwrap();
-                    wsender.send(WsUpdate::ReloadClient).unwrap();
-                }
-            }
-        }
-    }
+    handle.join().unwrap();
 }
 
-fn foo<F>(path: String, producer: F) -> Receiver<Message>
+fn watch_file<F>(path: String, producer: F) -> JoinHandle<()>
 where
-    F: Fn(&Sender<Message>, String) + Send + 'static,
+    F: Fn(String) + Send + 'static,
 {
-    let (sender, receiver) = mpsc::channel();
-    let _ = thread::spawn(move || {
+    let handle = thread::spawn(move || {
         let mut last_hash = vec![0u8; 20];
         loop {
             match fs::metadata(&path) {
@@ -102,14 +92,14 @@ where
                     if last_hash != result {
                         last_hash = result;
                         let data = fs::read_to_string(&path).unwrap();
-                        producer(&sender, data);
+                        producer(data);
                     }
                 }
             }
             thread::sleep(Duration::from_millis(50));
         }
     });
-    receiver
+    handle
 }
 
 fn get_base_path(path: &str) -> String {

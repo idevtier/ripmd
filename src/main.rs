@@ -4,22 +4,17 @@ mod server;
 mod uml;
 
 use clap::Parser;
-use md2html::Html;
 use md2html::Md2HtmlConverter;
 use resolve_path::PathResolveExt;
 use sha1::{Digest, Sha1};
 use std::fs::{self, File};
 use std::io::Read;
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc;
 use std::thread;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
 const CHUNK_SIZE: usize = 1024;
-
-enum Message {
-    FileUpdated(Html),
-}
 
 pub enum WsUpdate {
     ReloadClient,
@@ -37,7 +32,7 @@ struct Args {
 fn main() {
     let mut args = Args::parse();
 
-    if args.path.starts_with("~") {
+    if args.path.starts_with('~') {
         args.path = args.path.resolve().to_str().unwrap().to_owned();
     }
 
@@ -72,7 +67,7 @@ fn watch_file<F>(path: String, producer: F) -> JoinHandle<()>
 where
     F: Fn(String) + Send + 'static,
 {
-    let handle = thread::spawn(move || {
+    thread::spawn(move || {
         let mut last_hash = vec![0u8; 20];
         loop {
             match fs::metadata(&path) {
@@ -98,11 +93,10 @@ where
             }
             thread::sleep(Duration::from_millis(50));
         }
-    });
-    handle
+    })
 }
 
 fn get_base_path(path: &str) -> String {
-    let splited: Vec<_> = path.split("/").collect();
+    let splited: Vec<_> = path.split('/').collect();
     splited[..splited.len() - 1].join("/")
 }

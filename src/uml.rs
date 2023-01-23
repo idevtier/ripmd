@@ -15,7 +15,7 @@ pub fn convert(uml: &str, path: &str) -> Result<()> {
     let mut child = Command::new("plantuml")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .args(["-tsvg", &uml.to_owned(), "-pipe"])
+        .args(["-tsvg", uml, "-pipe"])
         .spawn()?;
     let mut stdin = child.stdin.take().ok_or(std::io::ErrorKind::NotFound)?;
     let uml = uml.to_owned();

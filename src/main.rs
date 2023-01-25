@@ -1,20 +1,13 @@
+mod file_watcher;
 mod md2html;
-mod plantuml_parser;
 mod server;
-mod uml;
 
 use clap::Parser;
-use md2html::Md2HtmlConverter;
+use md2html::GithubMd2HtmlConverter;
 use resolve_path::PathResolveExt;
-use sha1::{Digest, Sha1};
-use std::fs::{self, File};
-use std::io::Read;
+use std::fs;
 use std::sync::mpsc;
 use std::thread;
-use std::thread::JoinHandle;
-use std::time::Duration;
-
-const CHUNK_SIZE: usize = 1024;
 
 pub enum WsUpdate {
     ReloadClient,
@@ -27,29 +20,29 @@ struct Args {
 
     #[arg(short, long)]
     pub github_token: String,
+
+    #[arg(short, long, default_value_t = 8080)]
+    pub fronted_port: u16,
+
+    #[arg(short, long, default_value_t = 8089)]
+    pub reloader_port: u16,
 }
 
 fn main() {
     let mut args = Args::parse();
 
     if args.path.starts_with('~') {
-        args.path = args
-            .path
-            .try_resolve()
-            .expect("Failed to resolve path")
-            .to_str()
-            .unwrap()
-            .to_owned();
+        args.path = resolve_path(&args.path);
     }
 
-    let converter = Md2HtmlConverter::new(&args.github_token);
+    let mut converter = GithubMd2HtmlConverter::new(&args.github_token);
 
     create_temp_dir_if_needed();
 
     let (ssender, sreceiver) = mpsc::channel();
     let (wsender, wreceiver) = mpsc::channel();
 
-    let handle = watch_file(args.path.to_owned(), move |md| {
+    let handle = file_watcher::watch(args.path.to_owned(), move |md| {
         let html = converter.convert(&md);
         match html {
             Err(e) => println!("Failed to load html: {:?}", e),
@@ -62,45 +55,15 @@ fn main() {
     });
 
     let base_path = get_base_path(&args.path);
-    thread::spawn(|| server::serve("localhost:8080", sreceiver, base_path));
-    thread::spawn(|| server::ws("localhost:8089", wreceiver));
+    let fronted_address = format!("localhost:{}", args.fronted_port);
+    let reloader_address = format!("localhost:{}", args.reloader_port);
+
+    thread::spawn(move || server::serve(&fronted_address, sreceiver, base_path));
+    thread::spawn(move || server::ws(&reloader_address, wreceiver));
 
     handle
         .join()
         .expect("Failed to start markdown file watcher");
-}
-
-fn watch_file<F>(path: String, producer: F) -> JoinHandle<()>
-where
-    F: Fn(String) + Send + 'static,
-{
-    thread::spawn(move || {
-        let mut last_hash = vec![0u8; 20];
-        loop {
-            match fs::metadata(&path) {
-                Err(e) => println!("Got error: {:?}", e),
-                Ok(_) => {
-                    let mut hasher = Sha1::new();
-                    let mut buffer = vec![0u8; CHUNK_SIZE];
-                    let mut file = File::open(&path).unwrap();
-                    loop {
-                        let count = file.read(&mut buffer).unwrap();
-                        hasher.update(&buffer);
-                        if count == 0 {
-                            break;
-                        }
-                    }
-                    let result = hasher.finalize().into_iter().collect();
-                    if last_hash != result {
-                        last_hash = result;
-                        let data = fs::read_to_string(&path).unwrap();
-                        producer(data);
-                    }
-                }
-            }
-            thread::sleep(Duration::from_millis(50));
-        }
-    })
 }
 
 fn create_temp_dir_if_needed() {
@@ -112,4 +75,12 @@ fn create_temp_dir_if_needed() {
 fn get_base_path(path: &str) -> String {
     let splited: Vec<_> = path.split('/').collect();
     splited[..splited.len() - 1].join("/")
+}
+
+fn resolve_path(path: &str) -> String {
+    path.try_resolve()
+        .expect("Failed to resolve path")
+        .to_str()
+        .unwrap()
+        .to_owned()
 }

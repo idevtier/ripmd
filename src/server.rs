@@ -68,11 +68,9 @@ fn handle_connection(mut stream: TcpStream, receiver: &Receiver<Html>, base_path
             let path = base_path.to_owned() + "/" + &image[1];
             (path, "image/png")
         };
-        println!("path: {}", path);
-        let img = File::open(&path);
+        let img = File::open(path);
         if let Ok(mut img) = img {
             let mut buf = Vec::new();
-            println!("Find in path {}", path);
             img.read_to_end(&mut buf).unwrap();
 
             let headers = [
@@ -80,7 +78,7 @@ fn handle_connection(mut stream: TcpStream, receiver: &Receiver<Html>, base_path
                 &format!("Content-type: {}", content_type),
                 "\r\n",
             ];
-            let mut resp = headers.join("\r\n").to_string().into_bytes();
+            let mut resp = headers.join("\r\n").into_bytes();
             resp.extend(buf);
             stream.write_all(&resp).unwrap();
         }
@@ -92,5 +90,5 @@ fn update_last_content(new_contnet: &Html) {
 }
 
 fn get_last_content() -> String {
-    unsafe { LAST_CONTENT.clone().unwrap_or("".to_owned()) }
+    unsafe { LAST_CONTENT.clone().unwrap_or_else(|| "".to_owned()) }
 }

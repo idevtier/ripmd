@@ -1,21 +1,21 @@
 use std::{
-    fs,
     io::Write,
     process::{Command, Stdio},
     thread,
 };
 
+use super::Html;
+
 pub type Result<T> = std::io::Result<T>;
 
 /// Converts given UML text to svg by using
-/// `plantuml` app. Saves result in path from
-/// `path` param.
-pub fn convert(uml: &str, path: &str) -> Result<()> {
-    println!("Got uml: {}", uml);
+/// `plantuml` app. Returns `UML` if success
+pub(crate) fn convert(uml: &str) -> Result<Html> {
+    println!("Converting uml {} to svg", uml);
     let mut child = Command::new("plantuml")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .args(["-tsvg", &uml.to_owned(), "-pipe"])
+        .args(["-tsvg", uml, "-pipe"])
         .spawn()?;
     let mut stdin = child.stdin.take().ok_or(std::io::ErrorKind::NotFound)?;
     let uml = uml.to_owned();
@@ -25,8 +25,6 @@ pub fn convert(uml: &str, path: &str) -> Result<()> {
             .expect("Failed to write to stdin");
     });
 
-    child.wait()?;
     let uml = child.wait_with_output()?;
-    fs::write(path, uml.stdout)?;
-    Ok(())
+    Ok(String::from_utf8(uml.stdout).unwrap())
 }

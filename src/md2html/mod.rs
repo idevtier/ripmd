@@ -6,25 +6,30 @@ use reqwest::{
     header::{self, HeaderMap, HeaderValue},
 };
 
-use crate::plantuml_parser;
+use self::plantuml::Plantuml;
+
+mod plantuml;
+mod uml2svg;
 
 pub type Html = String;
 pub type Result<T> = core::result::Result<T, reqwest::Error>;
 
 const ENDPOINT: &str = "https://api.github.com/markdown";
 
-pub struct Md2HtmlConverter {
+pub struct GithubMd2HtmlConverter {
     token: String,
+    plantuml: Plantuml,
 }
 
-impl Md2HtmlConverter {
+impl GithubMd2HtmlConverter {
     pub fn new(token: &str) -> Self {
         Self {
             token: token.to_string(),
+            plantuml: Plantuml::new(),
         }
     }
 
-    pub fn convert(&self, markdown: &str) -> Result<Html> {
+    pub fn convert(&mut self, markdown: &str) -> Result<Html> {
         let client_builder = ClientBuilder::new();
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -45,8 +50,10 @@ impl Md2HtmlConverter {
             .json(&request)
             .send()?;
 
-        let mut html = res.text()?;
-        html = plantuml_parser::replace_plantuml_with_images(&html);
+        let html = self
+            .plantuml
+            .replace_plantuml_with_images(res.text()?, uml2svg::convert)
+            .unwrap();
 
         Ok(html)
     }
